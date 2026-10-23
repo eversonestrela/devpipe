@@ -269,3 +269,16 @@ table.list tr:hover td{background:#0d1621}
 .cmp-cp:hover:not(:disabled){color:var(--cyan);border-color:var(--cyan)}
 .cmp-cp:disabled{opacity:.4;cursor:default}
 .cmp-tab.sel-l td:nth-child(4),.cmp-tab.sel-r td:nth-child(2){user-select:none}
+
+/* ---------- avisos "precisa de você" ---------- */
+.aviso-ctl{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-bottom:8px}
+.aviso-ctl button{font:inherit;font-size:12px;cursor:pointer;border:1px solid var(--line);background:transparent;color:var(--dim);border-radius:6px;padding:6px 8px}
+.aviso-ctl .aviso-sino{flex:1;text-align:left}
+.aviso-ctl .aviso-sino.on{color:var(--green);border-color:rgba(52,211,153,.4)}
+.aviso-ctl .aviso-sino.pedir{color:#f59e0b;border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.07)}
+.aviso-ctl .aviso-sino.parcial{color:#f59e0b}
+.aviso-ctl button:hover{color:#fff;border-color:#3a5470}
+.aviso-ctl button:focus-visible{outline:2px solid #22d3ee;outline-offset:2px}
+.aviso-ctl .aviso-som.off{opacity:.6}
+.aviso-ctl .qtd{width:100%;font-size:11px;color:var(--dim);font-family:var(--mono)}
+.aviso-ctl .qtd.tem{color:#f59e0b}

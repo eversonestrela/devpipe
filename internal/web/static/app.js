@@ -302,13 +302,169 @@ async function loadBase() {
   [S.meta, S.projects, S.demands, S.settings] = await Promise.all([api("GET", "/api/meta"), api("GET", "/api/projects"), api("GET", "/api/demands"), api("GET", "/api/settings")]);
   updateAIIndicator();
 }
-async function reloadDemands() { S.demands = await api("GET", "/api/demands"); updateAIIndicator(); }
+async function reloadDemands() { const antes = S.demands; S.demands = await api("GET", "/api/demands"); updateAIIndicator(); AVISO.comparar(antes, S.demands); }
 function updateAIIndicator() {
   const n = S.demands.filter((d) => d.status === "executando").length;
   const el = $("#ai-indicator");
   el.className = "ai-ind " + (n ? "on" : "idle");
   $(".lbl", el).textContent = n ? `IA ativa · ${n} missão${n > 1 ? "ões" : ""}` : "IA ociosa";
 }
+
+
+// ------------------------------------------------------------ avisos ("precisa de você")
+// Quando uma demanda passa a depender de você (revisão, aprovação da especificação,
+// bloqueio ou falha), o DevPipe avisa: notificação do Windows (com a aba em segundo
+// plano), som curto e contador no título da aba e no ícone. Preferências ficam no
+// navegador (localStorage); nada vai para o servidor.
+const AVISO = {
+  pref: { ligado: localStorage.getItem("devpipe.avisos") !== "0", som: localStorage.getItem("devpipe.avisosSom") !== "0" },
+  avisados: new Map(), // id -> chave da situação já avisada (evita repetir em reconexões)
+  audio: null,
+  tituloBase: document.title,
+  iconeBase: null,
+
+  precisa(d) {
+    if (!d) return null;
+    if (d.status === "aguardando_aprovacao" && d.stage === "revisao") return { tipo: "revisao", texto: "Pronta para sua revisão" };
+    if (d.status === "aguardando_aprovacao") return { tipo: "aprovacao", texto: "Especificação aguardando sua aprovação" };
+    if (d.stage === "bloqueado" || d.status === "falhou") return { tipo: "bloqueio", texto: "Bloqueada" + (d.message ? ": " + d.message : "") };
+    return null;
+  },
+  chave(d) { return `${d.stage}|${d.status}|${d.currentRevision || ""}`; },
+
+  iniciar() {
+    this.iconeBase = $('link[rel="icon"]')?.href || "";
+    // situação inicial: o que já estava pendente não gera aviso, só entra no contador
+    for (const d of S.demands) if (this.precisa(d)) this.avisados.set(d.id, this.chave(d));
+    this.atualizarContador();
+    this.montarControle();
+    // o navegador só libera som depois de um clique na página
+    const liberar = () => { this.prepararAudio(); document.removeEventListener("pointerdown", liberar); document.removeEventListener("keydown", liberar); };
+    document.addEventListener("pointerdown", liberar);
+    document.addEventListener("keydown", liberar);
+  },
+
+  verificar(antes, d) {
+    const p = this.precisa(d);
+    if (!p) { this.avisados.delete(d.id); this.atualizarContador(); return; }
+    const k = this.chave(d);
+    if (this.avisados.get(d.id) !== k && (!antes || this.chave(antes) !== k)) {
+      this.avisados.set(d.id, k);
+      this.avisar(d, p);
+    } else this.avisados.set(d.id, k);
+    this.atualizarContador();
+  },
+  comparar(antes, depois) {
+    const ant = new Map((antes || []).map((x) => [x.id, x]));
+    for (const d of depois) this.verificar(ant.get(d.id), d);
+    for (const id of [...this.avisados.keys()]) if (!depois.some((d) => d.id === id)) this.avisados.delete(id);
+    this.atualizarContador();
+  },
+
+  avisar(d, p) {
+    if (!this.pref.ligado) return;
+    const titulo = `${d.ticket} · ${p.texto.split(":")[0]}`;
+    const corpo = `${d.title}${p.tipo === "bloqueio" && d.message ? "\n" + d.message : ""}`;
+    const emFoco = document.visibilityState === "visible" && document.hasFocus();
+    if (!emFoco && "Notification" in window && Notification.permission === "granted") {
+      try {
+        const n = new Notification(titulo, { body: corpo, tag: "devpipe-" + d.id, icon: this.iconeBase || undefined, requireInteraction: p.tipo !== "revisao" });
+        n.onclick = () => { window.focus(); location.hash = `#/demandas/${d.id}`; n.close(); };
+      } catch { /* alguns navegadores bloqueiam fora de contexto seguro */ }
+    }
+    toast(`${titulo}: ${d.title}`, p.tipo === "bloqueio" ? "err" : "");
+    if (this.pref.som) this.tocar(p.tipo);
+  },
+
+  prepararAudio() {
+    if (this.audio) return;
+    try { this.audio = new (window.AudioContext || window.webkitAudioContext)(); } catch { this.audio = null; }
+  },
+  tocar(tipo) {
+    const ctx = this.audio; if (!ctx) return;
+    if (ctx.state === "suspended") ctx.resume();
+    // revisão/aprovação: dois tons subindo; bloqueio: dois tons descendo
+    const notas = tipo === "bloqueio" ? [660, 440] : [660, 880];
+    notas.forEach((f, i) => {
+      const o = ctx.createOscillator(), g = ctx.createGain(), t = ctx.currentTime + i * 0.16;
+      o.type = "sine"; o.frequency.value = f;
+      g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(0.18, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + 0.28);
+      o.connect(g).connect(ctx.destination); o.start(t); o.stop(t + 0.3);
+    });
+  },
+
+  pendentes() { return S.demands.filter((d) => this.precisa(d)); },
+  atualizarContador() {
+    const n = this.pendentes().length;
+    document.title = n ? `(${n}) ${this.tituloBase}` : this.tituloBase;
+    this.desenharIcone(n);
+    const b = $("#aviso-ctl .qtd");
+    if (b) { b.textContent = n ? `${n} esperando você` : "nada pendente"; b.classList.toggle("tem", !!n); }
+  },
+  desenharIcone(n) {
+    const link = $('link[rel="icon"]'); if (!link) return;
+    if (!n) { if (this.iconeBase) link.href = this.iconeBase; return; }
+    const c = document.createElement("canvas"); c.width = c.height = 64;
+    const g = c.getContext("2d");
+    const img = new Image();
+    img.onload = () => {
+      g.drawImage(img, 0, 0, 64, 64);
+      g.fillStyle = "#f59e0b"; g.beginPath(); g.arc(46, 18, 17, 0, Math.PI * 2); g.fill();
+      g.fillStyle = "#0b1119"; g.font = "bold 24px system-ui, sans-serif"; g.textAlign = "center"; g.textBaseline = "middle";
+      g.fillText(n > 9 ? "9+" : String(n), 46, 19);
+      link.href = c.toDataURL("image/png");
+    };
+    img.src = this.iconeBase;
+  },
+
+  estadoPermissao() {
+    if (!("Notification" in window)) return "indisponivel";
+    return Notification.permission; // default | granted | denied
+  },
+  montarControle() {
+    const pe = $(".side-foot"); if (!pe || $("#aviso-ctl")) return;
+    pe.insertAdjacentHTML("afterbegin", `<div id="aviso-ctl" class="aviso-ctl">
+      <button type="button" class="aviso-sino" title="Avisos quando uma demanda precisar de você"></button>
+      <button type="button" class="aviso-som" title="Som dos avisos"></button>
+      <span class="qtd"></span></div>`);
+    $("#aviso-ctl .aviso-sino").addEventListener("click", () => this.alternar());
+    $("#aviso-ctl .aviso-som").addEventListener("click", () => {
+      this.pref.som = !this.pref.som; localStorage.setItem("devpipe.avisosSom", this.pref.som ? "1" : "0");
+      this.prepararAudio(); if (this.pref.som) this.tocar("revisao");
+      this.desenharControle();
+    });
+    this.desenharControle(); this.atualizarContador();
+  },
+  desenharControle() {
+    const sino = $("#aviso-ctl .aviso-sino"), som = $("#aviso-ctl .aviso-som"); if (!sino) return;
+    const perm = this.estadoPermissao();
+    let txt = "🔕 Avisos desligados", cls = "off";
+    if (this.pref.ligado) {
+      if (perm === "granted") { txt = "🔔 Avisos ligados"; cls = "on"; }
+      else if (perm === "denied") { txt = "🔔 Só na tela (Windows bloqueado)"; cls = "parcial"; }
+      else if (perm === "indisponivel") { txt = "🔔 Avisos na tela"; cls = "parcial"; }
+      else { txt = "🔔 Ativar avisos do Windows"; cls = "pedir"; }
+    }
+    sino.textContent = txt; sino.className = "aviso-sino " + cls;
+    sino.title = perm === "denied" ? "O navegador bloqueou as notificações deste site. Libere no cadeado da barra de endereço." : "Avisos quando uma demanda precisar de você";
+    som.textContent = this.pref.som ? "🔊" : "🔇"; som.classList.toggle("off", !this.pref.som);
+    som.setAttribute("aria-pressed", String(this.pref.som));
+  },
+  async alternar() {
+    this.prepararAudio();
+    const perm = this.estadoPermissao();
+    if (this.pref.ligado && perm === "default") {
+      const r = await Notification.requestPermission();
+      if (r === "granted") { toast("Avisos do Windows ativados", "ok"); try { new Notification("DevPipe", { body: "Você será avisado quando uma demanda precisar de você.", icon: this.iconeBase || undefined }); } catch {} }
+      this.desenharControle(); return;
+    }
+    this.pref.ligado = !this.pref.ligado;
+    localStorage.setItem("devpipe.avisos", this.pref.ligado ? "1" : "0");
+    if (this.pref.ligado && perm === "default") await Notification.requestPermission();
+    toast(this.pref.ligado ? "Avisos ligados" : "Avisos desligados", this.pref.ligado ? "ok" : "");
+    this.desenharControle();
+  },
+};
 
 // ------------------------------------------------------------ tempo real (SSE)
 let renderTimer = null;
@@ -326,6 +482,7 @@ function connectStream() {
       if (prev && prev.stage !== d.stage) S.flashIds.add(d.id);
       if (i >= 0) S.demands[i] = d; else S.demands.push(d);
       updateAIIndicator();
+      AVISO.verificar(prev, d);
       const r = route();
       if (["dashboard", "esteira"].includes(r.name) || (r.name === "demanda" && +r.id === d.id)) scheduleRender();
     } else if (msg.type === "event") {
@@ -1061,6 +1218,7 @@ VIEWS.notfound = async () => { $("#view").innerHTML = emptyState("Página não e
 // ------------------------------------------------------------ início
 (async function init() {
   try { await loadBase(); } catch (e) { $("#view").innerHTML = `<div class="callout bad">Não foi possível conectar ao servidor local: ${esc(e.message)}</div>`; return; }
+  AVISO.iniciar();
   connectStream();
   $(".brand small").textContent = "esteira IA · v" + S.meta.version;
   render();

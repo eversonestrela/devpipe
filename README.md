@@ -108,6 +108,18 @@ As ferramentas de edição dos agentes de IA trabalham em UTF-8. Em projetos ANS
 
 Menu **Fazenda (TV)** (ou `/fazenda.html`): painel animado em pixel art que mostra a esteira como uma fazenda, em que cada demanda é uma plantação, o Claude e você são os fazendeiros e o clima indica a saúde da esteira. `?demo=1` mostra dados fictícios para apresentação. Detalhes em `docs/FAZENDA.md`.
 
+## 4.3 Avisos quando uma demanda precisa de você
+
+Você não precisa ficar olhando a esteira. Quando uma demanda **chega na Revisão**, **pede aprovação da especificação** ou **bloqueia/falha**, o DevPipe avisa:
+
+- **Notificação do Windows** (quando a aba do DevPipe está em segundo plano). Clicar nela abre a demanda. Revisões somem sozinhas; aprovações e bloqueios ficam até você clicar.
+- **Som curto** (dois tons subindo para revisão/aprovação, descendo para bloqueio).
+- **Contador** no título da aba — `(3) DevPipe` — e no ícone da aba.
+
+No rodapé do menu lateral: **🔔 Ativar avisos do Windows** (na primeira vez o navegador pede permissão), **🔊/🔇** liga e desliga o som, e a linha logo abaixo mostra quantas demandas esperam você. As preferências ficam no navegador. Para receber os avisos, deixe a aba do DevPipe aberta (pode ficar minimizada ou atrás de outras janelas).
+
+Se aparecer "Só na tela (Windows bloqueado)", o navegador bloqueou as notificações do site: libere pelo cadeado na barra de endereço → Notificações → Permitir.
+
 ## 5. Projeto de demonstração
 
 `demo/loja-demo` é um projeto JavaScript sem dependências (usa só o Node, que qualquer instalação do Claude Code via npm já tem; com o instalador nativo, instale o Node 18+ para rodar os testes do demo). `demo/demanda-exemplo/CH-1001-cupom-desconto.docx` é a especificação de uma demanda real.
